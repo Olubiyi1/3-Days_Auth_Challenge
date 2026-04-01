@@ -14,5 +14,6 @@ export const Loggers ={
     SERVICE:createLabel("SERVICE"),
     CONTROLLER:createLabel("CONTROLLER"),
     APP:createLabel("APP"),
-    SERVER:createLabel("SERVER")
+    SERVER:createLabel("SERVER"),
+    EMAILSENDER:createLabel("EMAILSENDER")
 }

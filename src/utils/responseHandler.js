@@ -36,7 +36,7 @@ class ResponseHandler {
   }
   static serverError(res, message = "Internal Server Error") {
     res.status(500).json({
-      status: "fail",
+      status: "error",
       message,
     });
   }

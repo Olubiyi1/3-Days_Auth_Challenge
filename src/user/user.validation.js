@@ -36,7 +36,7 @@ export const registerUserValidationSchema = Joi.object({
     .messages(validationMessages.password),
 
   role: Joi.string()
-    .valid("client", "designer")
+    .valid("user", "admin")
     .required()
     .messages(validationMessages.role),
 });
