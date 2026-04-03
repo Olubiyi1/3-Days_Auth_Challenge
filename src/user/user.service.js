@@ -9,8 +9,17 @@ import {
   createRefreshToken,
 } from "../guards/guards.js";
 import AppError from "../errorHandlers/appError.js";
-import { sendVerificationEmail,sendResetPasswordEmail } from "../helpers/email.js";
+import {
+  sendVerificationEmail,
+  sendResetPasswordEmail,
+} from "../helpers/email.js";
 import config from "../config/config.js";
+import jwt from "jsonwebtoken";
+
+const SCOPE = "openid email profile";
+const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+
+const serviceLogs = Loggers.SERVICE;
 
 export const registerUser = async (userData) => {
   const serviceLogs = Loggers.SERVICE;
@@ -230,7 +239,7 @@ export const userLogin = async (userData) => {
 };
 
 export const forgotPassword = async (email) => {
-  const serviceLogs = Loggers.SERVICE
+  const serviceLogs = Loggers.SERVICE;
   if (!email) {
     throw new AppError("Email is required", 400);
   }
@@ -285,4 +294,133 @@ export const resetPassword = async (token, newPassword) => {
   return {
     message: "Password reset successful, please login with your new password",
   };
+};
+
+export const getGoogleAuthUrl = () => {
+  const rootUrl = "https://accounts.google.com/o/oauth2/v2/auth";
+  const options = new URLSearchParams({
+    client_id: config.google_client_id,
+    redirect_uri: config.redirect_uri,
+    response_type: "code",
+    scope: SCOPE,
+    access_type: "offline",
+    prompt: "consent",
+  });
+  return `${rootUrl}?${options.toString()}`;
+};
+
+// exchange code for token and decode user info
+export const getGoogleUserInfo = async (code) => {
+  try {
+    const tokenResponse = await axios.post(
+      "https://oauth2.googleapis.com/token",
+      new URLSearchParams({
+        code,
+        client_id: config.google_client_id,
+        client_secret: config.google_client_secret,
+        redirect_uri: config.redirect_uri,
+        grant_type: "authorization_code",
+      }),
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
+    );
+    const { id_token } = tokenResponse.data;
+
+    // contains email, name ,profile
+    return jwt.decode(id_token);
+  } catch (err) {
+    serviceLogs.error("Failed to exchange Google code for token", {
+      error: err.message,
+    });
+    throw new AppError("Failed to login with Google", 500);
+  }
+};
+
+// create/find user & generate app tokens
+export const googleLoginFlow = async (googleUserInfo) => {
+  const { email, name, sub } = googleUserInfo;
+  let user = await User.findOne({ email });
+
+  // existing user logins normally
+  if (user) {
+    const accessToken = createAccessToken(user);
+    const { refreshToken, hashedToken } = createRefreshToken();
+    const refreshTokenExpiresAt = new Date(
+      Date.now() + REFRESH_TOKEN_EXPIRY_MS,
+    );
+    user.refreshTokens = [
+      ...(user.refreshTokens || []),
+      { token: hashedToken, expiresAt: refreshTokenExpiresAt },
+    ];
+    await user.save();
+
+    serviceLogs.info("User logged in via Google", { email: user.email });
+    const displayName = user.firstName || user.name || user.email;
+
+    return { isNewUser: false, user, accessToken, refreshToken, displayName };
+  }
+
+  serviceLogs.info("New Google user detected, profile completion required", {
+    email,
+  });
+  return {
+    isNewUser: true,
+    googleProfile: { email, name, googleId: sub },
+  };
+};
+
+export const completeGoogleProfileFlow = async (profileData) => {
+  const { email, googleId, firstName, lastName, phone } = profileData;
+
+  // Safety check — prevent duplicate accounts
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    throw new AppError("User with this email already exists", 409);
+  }
+
+  const user = await User.create({
+    email,
+    googleId,
+    firstName,
+    lastName,
+    phone,
+    role: "user",
+  });
+
+  const accessToken = createAccessToken(user);
+  const { refreshToken, hashedToken } = createRefreshToken();
+  const refreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
+
+  user.refreshTokens = [
+    ...(user.refreshTokens || []),
+    { token: hashedToken, expiresAt: refreshTokenExpiresAt },
+  ];
+  await user.save();
+
+  serviceLogs.info("New Google user profile completed", { email: user.email });
+
+  return { user, accessToken, refreshToken };
+};
+
+export const logout = async (refreshToken) => {
+  if (!refreshToken) return;
+
+  const hashedToken = crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
+
+  const user = await User.findOne({
+    "refreshTokens.token": hashedToken,
+  });
+
+  if (!user) return;
+
+  const now = new Date()
+
+  user.refreshTokens = user.refreshTokens.filter(
+    // removes expired token
+    (t) => t.token !== hashedToken && t.expiresAt > now,
+  );
+
+  await user.save();
 };

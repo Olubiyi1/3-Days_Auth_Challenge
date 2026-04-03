@@ -1,14 +1,18 @@
 import { Schema, model } from "mongoose";
 
+const requireIfLocal = function() {
+  return this.authProvider === "local";
+};
+
 const userSchema = new Schema({
   firstName: {
     type: String,
-    required: [true, "firname is required"],
+    required: requireIfLocal,
     trim: true,
   },
   lastName: {
     type: String,
-    required: [true, "lastname is required"],
+    required: requireIfLocal,
     trim: true,
   },
   email: {
@@ -19,9 +23,14 @@ const userSchema = new Schema({
   },
   password: {
     type: String,
-    required: [true, "Password is required"],
+    required: requireIfLocal,
     select: false,
   },
+  authProvider: {
+  type: String,
+  enum: ["local", "google"],
+  default: "local",
+},
   role: {
     type: String,
     enum: ["user", "admin"],

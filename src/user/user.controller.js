@@ -4,6 +4,11 @@ import {
   verifyEmail,
   forgotPassword,
   resetPassword,
+  getGoogleAuthUrl,
+  getGoogleUserInfo,
+  googleLoginFlow,
+  completeGoogleProfileFlow,
+  logout
 } from "./user.service.js";
 import {
   loginUserValidationSchema,
@@ -133,7 +138,7 @@ export const forgotPasswordContoller = async (req, res, next) => {
     if (err.isOperational) return next(err);
     controllerLogs.error("Forgot password failed", { error: err });
     console.log(err);
-    
+
     return next(new AppError("Something went wrong", 500));
   }
 };
@@ -156,7 +161,101 @@ export const resetPasswordController = async (req, res, next) => {
     return responseHandler.success(res, result.message);
   } catch (err) {
     if (err.isOperational) return next(err);
-    controllerLog.error("Reset password failed", { error: err });
+    controllerLogs.error("Reset password failed", { error: err });
     return next(new AppError("Something went wrong", 500));
   }
 };
+
+export const getGoogleAuthUrlController = (req, res, next) => {
+  try {
+    const url = getGoogleAuthUrl();
+    return responseHandler.ok(res, "Google OAuth URL", { url });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const googleCallbackController = async (req, res, next) => {
+  const code = req.query.code;
+
+  if (!code) {
+    return next(new AppError("No code provided", 400));
+  }
+
+  try {
+    const googleUserInfo = await getGoogleUserInfo(code);
+    const result = await googleLoginFlow(googleUserInfo);
+
+    // New user — prompt frontend to complete profile
+    if (result.isNewUser) {
+      // frontend uses this to prefill the form
+      return responseHandler.ok(res, "Complete your profile to continue", {
+        isNewUser: true,
+        googleProfile: result.googleProfile,
+      });
+    }
+
+    // Existing user — normal login response
+    const { user, accessToken, refreshToken, displayName } = result;
+    return responseHandler.ok(res, `Login Successful! Welcome ${displayName}`, {
+      isNewUser: false,
+      accessToken,
+      refreshToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    controllerLogs.error("Error during Google login");
+    console.log(err);
+    return next(new AppError("Failed to login with Google", 500));
+  }
+};
+
+
+
+export const completeGoogleProfileController = async (req, res, next) => {
+  try {
+    const { user, accessToken, refreshToken } = await completeGoogleProfileFlow(req.body);
+
+    return responseHandler.success(res, `Welcome ${user.firstName}!`, {
+      accessToken,
+      refreshToken,
+      user: {
+        id: user._id,
+        name: user.firstName,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    controllerLogs.error("Error completing Google profile", { error: err.message });
+    return next(err);
+  }
+};
+
+export const logoutUserController = async (req,res,next)=>{
+  try{
+    const refreshToken = req.cookies.refreshToken;
+
+     await logout(refreshToken);
+
+     
+    res.clearCookie("refreshToken", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+    });
+    return responseHandler.success(res, "Logged out successfully", null, 200);
+  }
+  catch (err) {
+    controllerLogs.error("Unexpected error during logout", {
+      userId: req.user?.id,
+      error: err,
+    });
+    return next(err);
+  }
+}

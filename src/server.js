@@ -3,6 +3,7 @@ import connectDb from "./config/db.js";
 import config from "./config/config.js";
 import { Loggers } from "./utils/label.js";
 
+
 const dbLogger = Loggers.DB;
 const appLogger = Loggers.APP;
 let server;
