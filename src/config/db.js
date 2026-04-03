@@ -18,7 +18,7 @@ const connectDb = async () => {
       dbLogger.warn("mongoDb disconnected");
     });
   } catch (err) {
-    dbLogger.error("Failed to connect to database");
+    dbLogger.error("Failed to connect to database",{message:err.message});
     process.exit(1);
   }
 };

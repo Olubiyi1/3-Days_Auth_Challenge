@@ -1,12 +1,14 @@
 import bcrypt from "bcrypt"
 import jwt from "jsonwebtoken"
+import config from "../config/config.js"
+import crypto from "crypto"
 
 export const hashPassword = (password)=>{
     return bcrypt.hashSync(password,10)
 }
 
-export const comparePassword = (password,hashedPassword) =>{
-    return bcrypt.comparePassword(password,hashedPassword)
+export const comparePassword =async (password,hashedPassword) =>{
+    return bcrypt.compare(password,hashedPassword)
 }
 export const createAccessToken = (user)=>{
      const token = jwt.sign(
